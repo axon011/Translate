@@ -1,0 +1,21 @@
+[project]
+name = "news-nlp-pipeline"
+version = "0.1.0"
+description = "Multilingual News NLP Pipeline: ASR, Cross-Lingual NER, Event Classification, Summarization"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+ignore = ["E501", "B008"]  # E501: line length handled by formatter; B008: FastAPI File() in defaults is standard
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+markers = [
+    "slow: marks tests that require model loading (deselect with '-m not slow')",
+    "gpu: marks tests that require GPU",
+]

@@ -1,0 +1,132 @@
+# Model configurations for News NLP Pipeline
+
+# ASR (Automatic Speech Recognition)
+asr:
+  model_id: "models/whisper-tiny-german-ct2"  # CT2-converted from primeline/whisper-tiny-german-1224
+  compute_type: "int8"  # int8 quantization for 4GB VRAM
+  device: "cuda"
+  language: "de"
+  beam_size: 5
+  best_of: 5
+  temperature: 0.0
+
+# Named Entity Recognition
+ner:
+  model_id: "xlm-roberta-large-finetuned-conll03-german"
+  device: "cuda"
+  batch_size: 16
+  max_length: 512
+  precision: "fp16"  # FP16 for memory efficiency
+  aggregation_strategy: "simple"
+
+# Event Classification
+classifier:
+  model_id: "distilbert-base-multilingual-cased"
+  device: "cuda"
+  batch_size: 32
+  max_length: 512
+  num_labels: 4
+  labels:
+    - "Political"
+    - "Economic" 
+    - "Sports"
+    - "Technology"
+  # Training parameters (for fine-tuning on 10kGNAD)
+  train:
+    learning_rate: 2e-5
+    num_epochs: 3
+    warmup_steps: 500
+    weight_decay: 0.01
+    save_steps: 500
+    eval_steps: 500
+
+# Summarization
+summarizer:
+  model_id: "sshleifer/distilbart-cnn-12-6"
+  device: "cuda"
+  max_length: 130
+  min_length: 30
+  length_penalty: 2.0
+  num_beams: 4
+  early_stopping: true
+
+# Translation (fallback strategy)
+translator:
+  model_id: "Helsinki-NLP/opus-mt-de-en"
+  device: "cuda"
+  max_length: 512
+  num_beams: 4
+
+# Language Detection
+lang_detect:
+  languages: ["de", "en"]
+  confidence_threshold: 0.8
+
+# Dataset configurations
+datasets:
+  # Classification dataset
+  classification:
+    name: "10kGNAD"
+    hf_id: "gnad10"
+    category_mapping:
+      "Inland": "Political"
+      "International": "Political"
+      "Wirtschaft": "Economic"
+      "Etat": "Economic"
+      "Sport": "Sports"
+      "Web": "Technology"
+      "Wissenschaft": "Technology"
+  
+  # NER evaluation dataset
+  ner_eval:
+    name: "WikiANN-de"
+    hf_id: "wikiann"
+    language: "de"
+  
+  # ASR evaluation dataset
+  asr_eval:
+    name: "FLEURS"
+    hf_id: "google/fleurs"
+    language: "de_de"
+    split: "test"
+
+# Hardware constraints
+hardware:
+  max_vram_gb: 4
+  gpu_device: "cuda:0"
+  enable_sequential_loading: true  # Load models one at a time for 4GB VRAM
+  clear_cache_between_models: true
+
+# API settings
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+  reload: false
+  log_level: "info"
+  cors_origins: ["*"]
+  max_audio_file_mb: 25
+  max_text_length: 10000
+
+# Logging
+logging:
+  level: "INFO"
+  format: "json"
+  output_dir: "logs"
+  console: true
+
+# Benchmarking
+benchmark:
+  warmup_runs: 3
+  num_runs: 10
+  measure_vram: true
+  measure_latency: true
+  percentiles: [50, 95, 99]
+  output_dir: "benchmark_results"
+
+# Paths
+paths:
+  cache_dir: "C:\\hf_cache"  # Windows path to avoid path length issues
+  model_dir: "models"
+  data_dir: "data"
+  results_dir: "results"

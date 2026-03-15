@@ -1,0 +1,25 @@
+services:
+  pipeline:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: news-nlp-pipeline
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf_cache:/app/hf_cache
+      - ../models:/app/models
+    environment:
+      - HF_HUB_CACHE=/app/hf_cache
+      - TRANSFORMERS_CACHE=/app/hf_cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  hf_cache:

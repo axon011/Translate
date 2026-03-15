@@ -1,0 +1,53 @@
+# Core ML
+torch>=2.2.0
+transformers>=4.38.0
+sentencepiece>=0.2.0
+protobuf>=4.25.0
+
+# ASR (Audio Speech Recognition)
+faster-whisper>=1.0.0
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# NER
+seqeval>=1.2.2
+
+# Language detection
+langdetect>=1.0.9
+
+# Translation evaluation
+sacrebleu>=2.4.0
+bert-score>=0.3.13
+
+# Summarization evaluation
+rouge-score>=0.1.2
+
+# Web scraping
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Data & utils
+datasets[audio]>=2.18.0
+pandas>=2.2.0
+scikit-learn>=1.4.0
+psutil>=5.9.0
+pyyaml>=6.0.0
+
+# MLOps
+mlflow>=2.12.0
+wandb>=0.16.0
+
+# API
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.6.0
+python-multipart>=0.0.9
+
+# Dev
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+ruff>=0.3.0
+
+# ONNX (optional, for inference optimization)
+# onnxruntime-gpu>=1.17.0
+# optimum>=1.17.0
