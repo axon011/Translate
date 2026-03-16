@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.models.classifier import EventClassifier, LABEL2ID, ID2LABEL
+from src.models.classifier import LABEL2ID, EventClassifier
 
 
 @pytest.fixture(scope="module")

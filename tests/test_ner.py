@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.models.ner import NERExtractor, ENTITY_TYPES
+from src.models.ner import ENTITY_TYPES, NERExtractor
 
 
 @pytest.fixture(scope="module")

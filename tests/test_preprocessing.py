@@ -2,9 +2,9 @@
 
 from src.data.preprocessing import (
     clean_news_text,
+    detect_script,
     normalize_text,
     truncate_text,
-    detect_script,
 )
 
 

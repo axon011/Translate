@@ -1,6 +1,6 @@
 """Tests for configuration loading."""
 
-from src.utils.config import load_config, PipelineConfig
+from src.utils.config import PipelineConfig, load_config
 
 
 class TestConfig:
