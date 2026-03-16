@@ -1,6 +1,6 @@
 # Multilingual News NLP Pipeline
 
-End-to-end pipeline for processing German news content: speech-to-text, named entity recognition, event classification, translation, and summarization. Built with production constraints in mind (4GB VRAM GPU, sequential model loading).
+End-to-end pipeline for processing German news content: speech-to-text, named entity recognition, event classification, translation, and summarization. Built with production constraints in mind (4GB VRAM, sequential model loading).
 
 ## Architecture
 
