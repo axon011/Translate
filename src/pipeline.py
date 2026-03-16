@@ -262,22 +262,24 @@ class NewsPipeline:
                 langs.append(detect_language(text))
             all_timings[i]["lang_detect_ms"] = round(t.elapsed_ms, 2)
 
-        # 2. NER - load once, process all
+        # 2. NER - load once, batch process all texts
         _clear_gpu_cache()
         self.ner.load()
-        all_entities = []
-        for i, text in enumerate(texts):
-            with TimingContext("ner") as t:
-                all_entities.append(self.ner.extract(text))
-            all_timings[i]["ner_ms"] = round(t.elapsed_ms, 2)
+        with TimingContext("ner_batch") as t_ner:
+            all_entities = self.ner.extract_batch(texts)
+        ner_ms = round(t_ner.elapsed_ms, 2)
+        per_item_ner = round(ner_ms / n, 2)
+        for i in range(n):
+            all_timings[i]["ner_ms"] = per_item_ner
 
-        # 3. Classification - NER+Classifier fit together (~1.6GB)
+        # 3. Classification - NER+Classifier fit together (~1.6GB), single forward pass
         self.classifier.load()
-        all_classifications = []
-        for i, text in enumerate(texts):
-            with TimingContext("classifier") as t:
-                all_classifications.append(self.classifier.classify(text))
-            all_timings[i]["classification_ms"] = round(t.elapsed_ms, 2)
+        with TimingContext("classify_batch") as t_cls:
+            all_classifications = self.classifier.classify_batch(texts)
+        cls_ms = round(t_cls.elapsed_ms, 2)
+        per_item_cls = round(cls_ms / n, 2)
+        for i in range(n):
+            all_timings[i]["classification_ms"] = per_item_cls
 
         # Unload both before loading translator/summarizer
         self.ner.unload()

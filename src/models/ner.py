@@ -168,7 +168,9 @@ class NERExtractor:
         return entities
 
     def extract_batch(self, texts: list[str]) -> list[list[Entity]]:
-        """Extract entities from multiple texts.
+        """Extract entities from multiple texts using batched inference.
+
+        Uses the HF pipeline's native batch support for fewer GPU kernel launches.
 
         Args:
             texts: List of input texts.
@@ -176,4 +178,41 @@ class NERExtractor:
         Returns:
             List of entity lists, one per input text.
         """
-        return [self.extract(t) for t in texts]
+        if not self._loaded:
+            self.load()
+
+        # Filter empty texts, track indices
+        valid = [(i, t) for i, t in enumerate(texts) if t and t.strip()]
+        results: list[list[Entity]] = [[] for _ in range(len(texts))]
+
+        if not valid:
+            return results
+
+        valid_indices, valid_texts = zip(*valid)
+
+        with TimingContext("ner_batch_inference") as t:
+            batch_raw = self._pipe(list(valid_texts), batch_size=len(valid_texts))
+
+        for idx, raw_entities in zip(valid_indices, batch_raw):
+            entities = []
+            for ent in raw_entities:
+                label = ent["entity_group"]
+                if label not in ENTITY_TYPES:
+                    continue
+                entities.append(
+                    Entity(
+                        text=ent["word"].strip(),
+                        label=label,
+                        score=round(float(ent["score"]), 4),
+                        start=ent["start"],
+                        end=ent["end"],
+                    )
+                )
+            results[idx] = entities
+
+        logger.debug(
+            f"Batch NER: {len(valid_texts)} texts in {t.elapsed_ms:.1f}ms",
+            extra={"component": "ner", "latency_ms": round(t.elapsed_ms, 1)},
+        )
+
+        return results

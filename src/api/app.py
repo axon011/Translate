@@ -162,6 +162,11 @@ def get_pipeline():
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     logger.info("Starting API server", extra={"component": "api"})
+    # Preload NER + Classifier into VRAM (~1.6GB, fits in 4GB)
+    pipeline = get_pipeline()
+    pipeline.ner.load()
+    pipeline.classifier.load()
+    logger.info("Preloaded NER + Classifier", extra={"component": "api"})
     yield
     logger.info("Shutting down API server", extra={"component": "api"})
 

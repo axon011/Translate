@@ -207,8 +207,38 @@ class EventClassifier:
 
     @torch.inference_mode()
     def classify_batch(self, texts: list[str]) -> list[ClassificationResult]:
-        """Classify multiple texts."""
-        return [self.classify(t) for t in texts]
+        """Classify multiple texts in a single batched forward pass."""
+        if not self._loaded:
+            self.load()
+
+        with TimingContext("classify_batch_inference") as t:
+            inputs = self._tokenizer(
+                texts,
+                return_tensors="pt",
+                truncation=True,
+                padding=True,
+                max_length=self.config.max_length,
+            ).to(self.device)
+
+            logits = self._model(**inputs).logits
+            probs = torch.softmax(logits, dim=-1)
+
+        results = []
+        for i in range(len(texts)):
+            pred_id = probs[i].argmax().item()
+            score = probs[i, pred_id].item()
+            all_scores = {ID2LABEL[j]: round(probs[i, j].item(), 4) for j in range(NUM_LABELS)}
+            label = ID2LABEL[pred_id] if score >= 0.75 else "Other"
+            results.append(
+                ClassificationResult(label=label, score=round(score, 4), all_scores=all_scores)
+            )
+
+        logger.debug(
+            f"Batch classified {len(texts)} texts in {t.elapsed_ms:.1f}ms",
+            extra={"component": "classifier", "latency_ms": round(t.elapsed_ms, 1)},
+        )
+
+        return results
 
     def train(
         self,
