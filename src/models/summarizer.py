@@ -64,7 +64,9 @@ class Summarizer:
         )
 
         self._tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
-        self._model = AutoModelForSeq2SeqLM.from_pretrained(self.config.model_id)
+        self._model = AutoModelForSeq2SeqLM.from_pretrained(
+            self.config.model_id, low_cpu_mem_usage=False
+        )
 
         # FP16 for GPU
         if self.device == "cuda":

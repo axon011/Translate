@@ -162,18 +162,24 @@ class NewsPipeline:
         timings["lang_detect_ms"] = round(t.elapsed_ms, 2)
 
         # 2. Cross-lingual NER (works on both German and English)
-        self._load_model(self.ner, "ner")
+        # NER + Classifier fit together (~1.6GB), so load both before unloading
+        if not self.ner.is_loaded:
+            self._load_model(self.ner, "ner")
         with TimingContext("ner") as t:
             entities = self.ner.extract(text)
         timings["ner_ms"] = round(t.elapsed_ms, 2)
-        self._unload_model(self.ner, "ner")
 
         # 3. Event classification (multilingual, works on German directly)
-        self._load_model(self.classifier, "classifier")
+        if not self.classifier.is_loaded:
+            self._load_model(self.classifier, "classifier")
         with TimingContext("classifier") as t:
             classification = self.classifier.classify(text)
         timings["classification_ms"] = round(t.elapsed_ms, 2)
-        self._unload_model(self.classifier, "classifier")
+
+        # Now unload NER + Classifier only if we need VRAM for summarization
+        if do_summary and self.sequential_mode:
+            self._unload_model(self.ner, "ner")
+            self._unload_model(self.classifier, "classifier")
 
         # 4. Summarization (optional, English-only model)
         summary = None
@@ -218,28 +224,114 @@ class NewsPipeline:
 
         return result
 
-    def run_batch(self, texts: list[str]) -> list[PipelineResult]:
-        """Process multiple texts through the pipeline.
+    def run_batch(
+        self, texts: list[str], include_summary: bool | None = None
+    ) -> list[PipelineResult]:
+        """Process multiple texts through the pipeline with stage-batched VRAM.
 
-        In sequential mode, processes texts one at a time.
-        In non-sequential mode, keeps models loaded across texts.
+        Loads each model ONCE, processes ALL texts, then moves to the next model.
+        For 3 articles this means 4 model loads instead of 12.
 
         Args:
             texts: List of input texts.
+            include_summary: Override for whether to include summary.
 
         Returns:
             List of PipelineResult objects.
         """
-        if not self.sequential_mode:
-            # Load all models once
-            self.ner.load()
-            self.classifier.load()
+        if not texts:
+            return []
 
-        results = [self.run(t) for t in texts]
+        do_summary = (
+            include_summary if include_summary is not None else self.enable_summary
+        )
+        n = len(texts)
+        request_ids = [str(uuid.uuid4())[:8] for _ in range(n)]
+        all_timings: list[dict[str, float]] = [{} for _ in range(n)]
 
-        if not self.sequential_mode:
-            self.ner.unload()
-            self.classifier.unload()
+        for i, text in enumerate(texts):
+            logger.info(
+                f"[{request_ids[i]}] Processing text ({len(text)} chars)",
+                extra={"component": "pipeline"},
+            )
+
+        # 1. Language detection (CPU, instant) - all texts
+        langs = []
+        for i, text in enumerate(texts):
+            with TimingContext("lang_detect", sync_cuda=False) as t:
+                langs.append(detect_language(text))
+            all_timings[i]["lang_detect_ms"] = round(t.elapsed_ms, 2)
+
+        # 2. NER - load once, process all
+        _clear_gpu_cache()
+        self.ner.load()
+        all_entities = []
+        for i, text in enumerate(texts):
+            with TimingContext("ner") as t:
+                all_entities.append(self.ner.extract(text))
+            all_timings[i]["ner_ms"] = round(t.elapsed_ms, 2)
+
+        # 3. Classification - NER+Classifier fit together (~1.6GB)
+        self.classifier.load()
+        all_classifications = []
+        for i, text in enumerate(texts):
+            with TimingContext("classifier") as t:
+                all_classifications.append(self.classifier.classify(text))
+            all_timings[i]["classification_ms"] = round(t.elapsed_ms, 2)
+
+        # Unload both before loading translator/summarizer
+        self.ner.unload()
+        self.classifier.unload()
+        _clear_gpu_cache()
+
+        # 4. Translation (only German texts, only if summarizing)
+        all_english_texts = list(texts)
+        if do_summary:
+            de_indices = [i for i, lang in enumerate(langs) if lang == "de"]
+            if de_indices:
+                self.translator.load()
+                for i in de_indices:
+                    with TimingContext("translation") as t:
+                        all_english_texts[i] = self.translator.translate(texts[i])
+                    all_timings[i]["translation_ms"] = round(t.elapsed_ms, 2)
+                self.translator.unload()
+                _clear_gpu_cache()
+
+        # 5. Summarization - load once, summarize all
+        all_summaries: list[SummaryResult | None] = [None] * n
+        if do_summary:
+            self.summarizer.load()
+            for i in range(n):
+                with TimingContext("summarize") as t:
+                    all_summaries[i] = self.summarizer.summarize(all_english_texts[i])
+                all_timings[i]["summarization_ms"] = round(t.elapsed_ms, 2)
+            self.summarizer.unload()
+            _clear_gpu_cache()
+
+        # Build results
+        results = []
+        for i in range(n):
+            all_timings[i]["total_ms"] = round(sum(all_timings[i].values()), 2)
+            result = PipelineResult(
+                request_id=request_ids[i],
+                original_text=texts[i],
+                detected_language=langs[i],
+                entities=all_entities[i],
+                classification=all_classifications[i],
+                summary=all_summaries[i],
+                timings=all_timings[i],
+            )
+            logger.info(
+                f"[{request_ids[i]}] Done: {len(all_entities[i])} entities, "
+                f"{all_classifications[i].label} ({all_classifications[i].score:.2f}), "
+                f"{all_timings[i]['total_ms']:.0f}ms total",
+                extra={
+                    "component": "pipeline",
+                    "latency_ms": all_timings[i]["total_ms"],
+                    "items": len(all_entities[i]),
+                },
+            )
+            results.append(result)
 
         return results
 

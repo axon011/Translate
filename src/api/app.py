@@ -11,15 +11,18 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from src.utils.config import get_config
@@ -63,6 +66,7 @@ class ExtractResponse(BaseModel):
     classification: ClassificationResponse
     summary: SummaryResponse | None = None
     processing_time_ms: float
+    timings: dict[str, float] = {}
 
 
 class TranscriptionResponse(BaseModel):
@@ -99,6 +103,29 @@ class ScrapeResponse(BaseModel):
     entities: list[EntityResponse]
     classification: ClassificationResponse
     summary: SummaryResponse | None = None
+    processing_time_ms: float
+    timings: dict[str, float] = {}
+
+
+class RssRequest(BaseModel):
+    source: str = Field(..., description="RSS feed name (e.g. 'Top News', 'Tagesschau')")
+    max_articles: int = Field(default=3, ge=1, le=10, description="Max articles to scrape")
+    include_summary: bool = Field(default=True, description="Whether to generate summaries")
+
+
+class RssArticleResult(BaseModel):
+    title: str
+    url: str
+    language_detected: str
+    entities: list[EntityResponse]
+    classification: ClassificationResponse
+    summary: SummaryResponse | None = None
+    word_count: int
+
+
+class RssResponse(BaseModel):
+    source: str
+    results: list[RssArticleResult]
     processing_time_ms: float
 
 
@@ -158,6 +185,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Dashboard static directory
+_static_dir = Path(__file__).resolve().parent / "static"
 
 
 # --- Endpoints ---
@@ -238,9 +268,8 @@ async def extract(request: ExtractRequest):
 
     try:
         t0 = time.perf_counter()
-        result = pipeline.run(
-            request.text,
-            include_summary=request.include_summary,
+        result = await asyncio.to_thread(
+            partial(pipeline.run, request.text, include_summary=request.include_summary)
         )
         total_ms = (time.perf_counter() - t0) * 1000
 
@@ -276,6 +305,7 @@ async def extract(request: ExtractRequest):
             classification=classification,
             summary=summary,
             processing_time_ms=round(total_ms, 1),
+            timings=result.timings,
         )
 
     except ValueError as e:
@@ -296,15 +326,14 @@ async def scrape(request: ScrapeRequest):
 
     pipeline = get_pipeline()
 
+    def _scrape_and_run():
+        art = scrape_article(request.url)
+        res = pipeline.run(art["cleaned_text"], include_summary=request.include_summary)
+        return art, res
+
     try:
         t0 = time.perf_counter()
-
-        article = scrape_article(request.url)
-        result = pipeline.run(
-            article["cleaned_text"],
-            include_summary=request.include_summary,
-        )
-
+        article, result = await asyncio.to_thread(_scrape_and_run)
         total_ms = (time.perf_counter() - t0) * 1000
 
         entities = [
@@ -341,6 +370,7 @@ async def scrape(request: ScrapeRequest):
             classification=classification,
             summary=summary,
             processing_time_ms=round(total_ms, 1),
+            timings=result.timings,
         )
 
     except ScrapeError as e:
@@ -474,3 +504,96 @@ async def full_pipeline(file: UploadFile = File()):
         raise HTTPException(status_code=500, detail=f"Pipeline error: {str(e)}") from e
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+
+
+@app.post("/rss", response_model=RssResponse)
+async def process_rss(request: RssRequest):
+    """Scrape articles from an RSS feed and process through the NLP pipeline.
+
+    Input: RSS feed name and max articles
+    Output: List of processed article results
+    """
+    from src.data.scraper import RSS_FEEDS, ScrapeError, scrape_from_rss
+
+    if request.source not in RSS_FEEDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown feed: {request.source}. Available: {list(RSS_FEEDS.keys())}",
+        )
+
+    pipeline = get_pipeline()
+
+    def _scrape_rss_and_run():
+        feed_url = RSS_FEEDS[request.source]
+        articles = scrape_from_rss(
+            feed_url, max_articles=request.max_articles, delay=1.0
+        )
+
+        # Batch process: loads each model once for all articles
+        texts = [a["cleaned_text"] for a in articles]
+        pipeline_results = pipeline.run_batch(
+            texts, include_summary=request.include_summary
+        )
+
+        results = []
+        for article, result in zip(articles, pipeline_results):
+            entities = [
+                EntityResponse(
+                    text=e.text,
+                    label=e.label,
+                    confidence=e.score,
+                    start=e.start,
+                    end=e.end,
+                )
+                for e in result.entities
+            ]
+
+            classification = ClassificationResponse(
+                label=result.classification.label,
+                confidence=result.classification.score,
+                all_scores=result.classification.all_scores,
+            )
+
+            summary = None
+            if result.summary:
+                summary = SummaryResponse(
+                    summary=result.summary.summary,
+                    input_length=result.summary.input_length,
+                    output_length=result.summary.output_length,
+                )
+
+            results.append(
+                RssArticleResult(
+                    title=article["title"],
+                    url=article["url"],
+                    language_detected=result.detected_language,
+                    entities=entities,
+                    classification=classification,
+                    summary=summary,
+                    word_count=article["word_count"],
+                )
+            )
+        return results
+
+    try:
+        t0 = time.perf_counter()
+        results = await asyncio.to_thread(_scrape_rss_and_run)
+        total_ms = (time.perf_counter() - t0) * 1000
+
+        return RssResponse(
+            source=request.source,
+            results=results,
+            processing_time_ms=round(total_ms, 1),
+        )
+
+    except ScrapeError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"RSS pipeline error: {e}", extra={"component": "api"})
+        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}") from e
+
+
+@app.get("/", include_in_schema=False)
+async def dashboard():
+    """Serve the dashboard UI."""
+    return FileResponse(str(_static_dir / "index.html"))

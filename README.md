@@ -1,6 +1,6 @@
 # Multilingual News NLP Pipeline
 
-End-to-end pipeline for processing German news content: speech-to-text, named entity recognition, event classification, translation, and summarization. Built with production constraints in mind (4GB VRAM, sequential model loading).
+End-to-end pipeline for processing German news content: speech-to-text, named entity recognition, event classification, translation, and summarization. Includes a live web dashboard and RSS feed processing. Built with production constraints in mind (4GB VRAM, smart VRAM caching).
 
 ## Architecture
 
@@ -25,7 +25,7 @@ Audio (German) --> Whisper ASR --> Language Detection --> Cross-Lingual NER
 
 1. **Cross-lingual NER over translate-then-NER** -- Translating German text to English before NER corrupts entity boundaries (e.g., compound nouns split incorrectly). XLM-RoBERTa handles German directly with zero-shot cross-lingual transfer.
 
-2. **Sequential model loading** -- With 4GB VRAM (RTX 3050), models are loaded one at a time with explicit `load()`/`unload()` and `torch.cuda.empty_cache()`. The largest model (XLM-RoBERTa NER) uses ~1067 MB.
+2. **Smart VRAM caching** -- With 4GB VRAM (RTX 3050), NER + Classifier stay loaded together (~1.6GB), only evicted when summarization needs VRAM. Batch RSS processing uses stage-batched loading (4 model loads for N articles instead of 4N). Repeat request latency ~40ms vs ~15s with full reload.
 
 3. **CTranslate2 for Whisper** -- The German-finetuned Whisper model is converted to CTranslate2 format with int8 quantization, reducing memory footprint while maintaining accuracy.
 
@@ -47,10 +47,10 @@ Audio (German) --> Whisper ASR --> Language Detection --> Cross-Lingual NER
 
 | Component | Metric | Score | Dataset |
 |-----------|--------|-------|---------|
-| NER | F1 (overall) | 0.630 | WikiANN German (500 samples) |
-| NER | F1 (PER) | 0.745 | WikiANN German |
-| NER | F1 (LOC) | 0.649 | WikiANN German |
-| NER | F1 (ORG) | 0.528 | WikiANN German |
+| NER | F1 (overall) | 0.647 | WikiANN German (500 samples) |
+| NER | F1 (PER) | 0.798 | WikiANN German |
+| NER | F1 (LOC) | 0.664 | WikiANN German |
+| NER | F1 (ORG) | 0.524 | WikiANN German |
 | Classifier | Accuracy | 93.55% | 10kGNAD (806 test samples) |
 | Classifier | Macro F1 | 94.07% | 10kGNAD |
 | Classifier | Balanced Accuracy | — | 10kGNAD |
@@ -61,9 +61,9 @@ Audio (German) --> Whisper ASR --> Language Detection --> Cross-Lingual NER
 | Translation | BLEU | — | Curated DE→EN parallel sentences (10 samples) |
 | Translation | ChrF | — | Curated DE→EN parallel sentences |
 | Translation | BERTScore F1 | — | Curated DE→EN parallel sentences |
-| Summarization | ROUGE-1 | — | Curated German news (5 samples) |
-| Summarization | ROUGE-2 | — | Curated German news |
-| Summarization | ROUGE-L | — | Curated German news |
+| Summarization | ROUGE-1 | 0.5234 | Curated German news (5 samples) |
+| Summarization | ROUGE-2 | 0.2265 | Curated German news |
+| Summarization | ROUGE-L | 0.3808 | Curated German news |
 
 ### Classifier Per-Class Performance
 
@@ -76,7 +76,7 @@ Audio (German) --> Whisper ASR --> Language Detection --> Cross-Lingual NER
 
 ### Notes on NER Evaluation
 
-The NER F1 of 0.63 reflects token-to-character alignment challenges between WikiANN's tokenization and the model's subword tokenization. Qualitative performance is substantially better -- the model correctly extracts entities like "Angela Merkel" (PER), "Berlin" (LOC), "Europaeische Union" (ORG) from German text with high confidence.
+NER F1=0.647 after fixing token-to-character alignment (improved from 0.63 with overlap-based alignment >50%). Qualitative performance is substantially better -- the model correctly extracts entities like "Angela Merkel" (PER), "Berlin" (LOC), "Europaeische Union" (ORG) from German text with high confidence.
 
 ## Production Benchmarks
 
@@ -88,26 +88,15 @@ Measured on NVIDIA GeForce RTX 3050 Laptop GPU (4096 MB VRAM), 10 runs with 3 wa
 | Classifier | 6.9 ms | 8.3 ms | 525 MB | 145.3 items/s |
 | Summarizer | 577.8 ms | 630.8 ms | 787 MB | 1.7 items/s |
 | Translator | 197.1 ms | 270.1 ms | 521 MB | 5.1 items/s |
+| ASR | 304.0 ms | 395.1 ms | ~0 MB* | 3.3 items/s |
 
-### MLflow Experiment Tracking
-
-Training runs are tracked with MLflow, logging hyperparameters, per-epoch loss/accuracy curves, and test metrics:
-
-```bash
-# Train with MLflow tracking (default)
-make train
-
-# View results
-make mlflow  # opens MLflow UI at http://localhost:5000
-```
-
-Tracked metrics include: `train_loss`, `val_accuracy`, `test_accuracy`, `test_macro_f1`, and per-class F1/precision/recall. Model artifacts are logged for reproducibility.
+*ASR benchmarked on 7.2s German audio clip.
 
 ## Setup
 
 ### Prerequisites
 
-- Python 3.12
+- Python 3.11+
 - NVIDIA GPU with CUDA support
 - [uv](https://github.com/astral-sh/uv) package manager
 
@@ -115,10 +104,10 @@ Tracked metrics include: `train_loss`, `val_accuracy`, `test_accuracy`, `test_ma
 
 ```bash
 # Create virtual environment
-uv venv --python 3.12
+uv venv --python 3.11
 
 # Activate (Windows)
-.\venv\Scripts\activate
+.\.venv\Scripts\activate
 
 # Install PyTorch with CUDA first (critical -- must be before other deps)
 uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
@@ -159,12 +148,16 @@ python -m scripts.train_classifier
 
 ```bash
 python -m uvicorn src.api.app:app --host 0.0.0.0 --port 8000
+# Visit http://localhost:8000 for the web dashboard
 ```
 
 **Endpoints:**
+- `GET /` -- Web dashboard UI (entity highlighting, classification bars, timing breakdown)
 - `GET /health` -- Health check with GPU status
 - `GET /models` -- List loaded models and memory usage
-- `POST /extract` -- Text processing (NER + classification)
+- `POST /extract` -- Text processing (NER + classification + summary)
+- `POST /scrape` -- URL scraping + NER + classification
+- `POST /rss` -- RSS feed processing (batch, stage-optimized)
 - `POST /asr/transcribe` -- Audio transcription
 - `POST /pipeline` -- Full pipeline (text or audio input)
 
@@ -245,13 +238,20 @@ python -m pytest tests/test_config.py tests/test_preprocessing.py tests/test_lan
 ├── scripts/
 │   ├── train_classifier.py
 │   ├── evaluate.py
-│   └── run_benchmark.py
+│   ├── run_benchmark.py
+│   ├── compare_ner_approaches.py
+│   ├── compare_live.py
+│   ├── scrape_and_process.py
+│   └── scrap.py
 ├── src/
 │   ├── api/
-│   │   └── app.py            # FastAPI endpoints
+│   │   ├── app.py            # FastAPI endpoints + async inference
+│   │   └── static/
+│   │       └── index.html    # Web dashboard UI
 │   ├── data/
 │   │   ├── dataset.py        # Dataset loaders (10kGNAD, WikiANN, FLEURS)
-│   │   └── preprocessing.py  # Text cleaning, normalization
+│   │   ├── preprocessing.py  # Text cleaning, normalization
+│   │   └── scraper.py        # Web scraping + RSS feeds
 │   ├── evaluation/
 │   │   ├── benchmark.py      # Latency, VRAM, throughput benchmarks
 │   │   └── metrics.py        # NER F1, classification metrics, WER
@@ -279,6 +279,8 @@ python -m pytest tests/test_config.py tests/test_preprocessing.py tests/test_lan
 - **API**: FastAPI + Uvicorn
 - **ML**: PyTorch 2.6 (CUDA 12.4), HuggingFace Datasets
 - **Evaluation**: seqeval (NER), jiwer (WER/CER), sacrebleu (BLEU/ChrF), bert-score, rouge-score, scikit-learn (classification)
-- **MLOps**: MLflow (experiment tracking, model registry), Docker, GitHub Actions CI
+- **Web UI**: Single-page dashboard (vanilla HTML/CSS/JS, served from FastAPI)
+- **Web Scraping**: requests + BeautifulSoup4, feedparser (RSS)
+- **MLOps**: MLflow (experiment tracking, model registry), Docker
 - **Testing**: pytest (53 tests)
 - **Tooling**: uv, ruff, Docker

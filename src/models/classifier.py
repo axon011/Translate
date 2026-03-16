@@ -196,8 +196,11 @@ class EventClassifier:
             extra={"component": "classifier", "latency_ms": round(t.elapsed_ms, 1)},
         )
 
+        # Low confidence means text doesn't fit any trained category
+        label = ID2LABEL[pred_id] if score >= 0.75 else "Other"
+
         return ClassificationResult(
-            label=ID2LABEL[pred_id],
+            label=label,
             score=round(score, 4),
             all_scores=all_scores,
         )

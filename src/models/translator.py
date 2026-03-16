@@ -60,7 +60,9 @@ class Translator:
         )
 
         self._tokenizer = MarianTokenizer.from_pretrained(self.config.model_id)
-        self._model = MarianMTModel.from_pretrained(self.config.model_id)
+        self._model = MarianMTModel.from_pretrained(
+            self.config.model_id, low_cpu_mem_usage=False
+        )
         self._model.to(self.device)
         self._model.eval()
 

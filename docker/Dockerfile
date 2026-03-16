@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy installed packages from builder
 COPY --from=builder /install /opt/conda
 
-# Copy application code
+# Copy application code (includes static/ for web dashboard)
 COPY src/ src/
 COPY configs/ configs/
 COPY pyproject.toml .
