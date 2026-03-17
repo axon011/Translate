@@ -56,9 +56,15 @@ class PipelineResult:
         }
 
 
-def _clear_gpu_cache() -> None:
-    """Free GPU memory between model loads."""
-    gc.collect()
+def _clear_gpu_cache(full: bool = False) -> None:
+    """Free GPU memory between model loads.
+
+    Args:
+        full: If True, also run gc.collect() (slower but reclaims Python objects).
+              Only needed after model unload, not between cached loads.
+    """
+    if full:
+        gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 

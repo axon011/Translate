@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gc
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -53,6 +54,9 @@ class Summarizer:
         self._tokenizer = None
         self._loaded = False
 
+        local_path = Path("models/summarizer-local")
+        self._load_from = str(local_path) if local_path.exists() else self.config.model_id
+
     def load(self) -> None:
         """Load model onto device."""
         if self._loaded:
@@ -63,15 +67,13 @@ class Summarizer:
             extra={"component": "summarizer", "model": self.config.model_id},
         )
 
-        self._tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
+        self._tokenizer = AutoTokenizer.from_pretrained(self._load_from)
+        # Local models are pre-saved as FP16 — load directly to GPU
         self._model = AutoModelForSeq2SeqLM.from_pretrained(
-            self.config.model_id, low_cpu_mem_usage=False
+            self._load_from,
+            low_cpu_mem_usage=False,
+            dtype=torch.float16 if self.device == "cuda" else torch.float32,
         )
-
-        # FP16 for GPU
-        if self.device == "cuda":
-            self._model = self._model.half()
-
         self._model.to(self.device)
         self._model.eval()
 

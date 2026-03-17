@@ -130,12 +130,28 @@ def scrape_article(url: str, timeout: int = 15) -> dict:
         ScrapeError: On fetch or extraction failure.
     """
     html = fetch_article_text(url, timeout=timeout)
-    raw_text = extract_text_from_html(html)
 
-    # Try to extract title from HTML
+    # Single parse for both text extraction and title
     soup = BeautifulSoup(html, "html.parser")
     title_tag = soup.find("title")
     title = title_tag.get_text(strip=True) if title_tag else url
+
+    # Remove non-content elements
+    for tag in soup.find_all(["script", "style", "nav", "footer", "header", "aside"]):
+        tag.decompose()
+
+    article = soup.find("article")
+    if article:
+        paragraphs = article.find_all("p")
+    else:
+        body = soup.find("body")
+        paragraphs = body.find_all("p") if body else soup.find_all("p")
+
+    raw_text = " ".join(p.get_text(strip=True) for p in paragraphs)
+    raw_text = " ".join(raw_text.split())
+
+    if not raw_text or len(raw_text) < 50:
+        raise ScrapeError("Could not extract meaningful text from HTML")
 
     cleaned = clean_news_text(raw_text)
     cleaned = truncate_text(cleaned, max_words=500)
@@ -157,7 +173,7 @@ def scrape_article(url: str, timeout: int = 15) -> dict:
 def scrape_from_rss(
     feed_url: str,
     max_articles: int = 5,
-    delay: float = 2.0,
+    delay: float = 0.5,
 ) -> list[dict]:
     """Scrape full articles from an RSS feed.
 

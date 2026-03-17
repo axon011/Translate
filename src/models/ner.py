@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gc
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 from transformers import AutoModelForTokenClassification, AutoTokenizer, pipeline
@@ -59,6 +60,10 @@ class NERExtractor:
         self._pipe = None
         self._loaded = False
 
+        # Cache local path check at init (avoid repeated filesystem I/O)
+        local_path = Path("models/ner-local")
+        self._load_from = str(local_path) if local_path.exists() else self.config.model_id
+
     def load(self) -> None:
         """Load model onto device. Call before inference."""
         if self._loaded:
@@ -69,13 +74,13 @@ class NERExtractor:
             extra={"component": "ner", "model": self.config.model_id},
         )
 
-        self._tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
-        self._model = AutoModelForTokenClassification.from_pretrained(self.config.model_id)
+        load_from = self._load_from
 
-        # FP16 for GPU memory efficiency
-        if self.device == "cuda" and self.config.precision == "fp16":
-            self._model = self._model.half()
-
+        self._tokenizer = AutoTokenizer.from_pretrained(load_from)
+        # Local models are pre-saved as FP16 — load directly to GPU
+        self._model = AutoModelForTokenClassification.from_pretrained(
+            load_from, dtype=torch.float16 if self.device == "cuda" else torch.float32
+        )
         self._model.to(self.device)
         self._model.eval()
 

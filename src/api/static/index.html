@@ -601,9 +601,15 @@
                     ZDF<br><span class="rss-lang">Deutsch</span>
                 </button>
             </div>
-            <div style="margin-top:8px;">
-                <label>Max Articles</label>
-                <input type="text" id="rss-max" value="3" style="width:60px;text-align:center;">
+            <div style="margin-top:8px;display:flex;gap:16px;align-items:center;">
+                <div>
+                    <label>Max Articles</label>
+                    <input type="text" id="rss-max" value="3" style="width:60px;text-align:center;">
+                </div>
+                <div class="checkbox-row" style="margin-top:14px;">
+                    <input type="checkbox" id="rss-summary">
+                    <label for="rss-summary" style="text-transform:none;font-weight:400;font-size:13px;">Include summary (+~20s)</label>
+                </div>
             </div>
         </div>
 
@@ -674,6 +680,17 @@
                     </div>
                 </div>
 
+                <!-- Generate Summary Button (shown when summary not included) -->
+                <div class="card" id="summary-btn-card" style="display:none;">
+                    <div class="card-body" style="text-align:center;padding:24px;">
+                        <button class="btn btn-primary" id="gen-summary-btn" onclick="generateSummary()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h14"/></svg>
+                            Generate Summary
+                        </button>
+                        <div style="font-size:12px;color:var(--text-dim);margin-top:8px;">Loads translator + summarizer (~15-20s)</div>
+                    </div>
+                </div>
+
                 <!-- Timings -->
                 <div class="card">
                     <div class="card-header">Performance</div>
@@ -703,6 +720,7 @@
 <script>
 const API = '';
 let history = [];
+let lastProcessedText = null;
 
 // Tab switching
 document.querySelectorAll('.tab').forEach(tab => {
@@ -774,6 +792,7 @@ async function processText() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'API Error');
+        lastProcessedText = text;
         renderResults(data, text);
         addHistory('Text', data.language_detected, data.classification.label);
     } catch (e) {
@@ -819,7 +838,11 @@ async function processRss(source) {
         const res = await fetch(API + '/rss', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: source, max_articles: max })
+            body: JSON.stringify({
+                source: source,
+                max_articles: max,
+                include_summary: document.getElementById('rss-summary').checked
+            })
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'API Error');
@@ -897,8 +920,10 @@ function renderResults(data, originalText) {
 
     // Summary
     const summaryCard = document.getElementById('summary-card');
+    const summaryBtnCard = document.getElementById('summary-btn-card');
     if (data.summary) {
         summaryCard.style.display = 'block';
+        summaryBtnCard.style.display = 'none';
         document.getElementById('summary-text').textContent = data.summary.summary;
         document.getElementById('summary-meta').innerHTML = `
             <span>Input: ${data.summary.input_length} words</span>
@@ -907,6 +932,7 @@ function renderResults(data, originalText) {
         `;
     } else {
         summaryCard.style.display = 'none';
+        summaryBtnCard.style.display = lastProcessedText ? 'block' : 'none';
     }
 
     // Timings
@@ -1028,6 +1054,59 @@ function addHistory(type, lang, result) {
             <span>${h.result} - ${h.time}</span>
         </div>`
     ).join('');
+}
+
+// Generate summary on-demand for the last processed text
+async function generateSummary() {
+    if (!lastProcessedText) return;
+
+    const btn = document.getElementById('gen-summary-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;"></div> Generating...';
+
+    try {
+        const res = await fetch(API + '/extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text: lastProcessedText,
+                include_summary: true
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'API Error');
+
+        // Show the summary card
+        if (data.summary) {
+            document.getElementById('summary-card').style.display = 'block';
+            document.getElementById('summary-btn-card').style.display = 'none';
+            document.getElementById('summary-text').textContent = data.summary.summary;
+            document.getElementById('summary-meta').innerHTML = `
+                <span>Input: ${data.summary.input_length} words</span>
+                <span>Summary: ${data.summary.output_length} words</span>
+                <span>Compression: ${((1 - data.summary.output_length / data.summary.input_length) * 100).toFixed(0)}%</span>
+            `;
+            // Update timings to include translation + summarization
+            const timings = data.timings || {};
+            const timingNames = {
+                lang_detect_ms: 'Lang Detect', ner_ms: 'NER', classification_ms: 'Classifier',
+                translation_ms: 'Translation', summarization_ms: 'Summarizer', total_ms: 'Total'
+            };
+            document.getElementById('timings-grid').innerHTML = Object.entries(timings)
+                .filter(([k]) => timingNames[k])
+                .map(([k, v]) => `
+                    <div class="timing-card">
+                        <div class="timing-value">${v.toFixed(0)}<span style="font-size:14px;opacity:0.7">ms</span></div>
+                        <div class="timing-label">${timingNames[k]}</div>
+                    </div>
+                `).join('');
+        }
+    } catch (e) {
+        alert('Error generating summary: ' + e.message);
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h14"/></svg> Generate Summary';
 }
 
 // Init

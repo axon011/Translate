@@ -125,7 +125,12 @@ def main():
 
         for text in test_split.texts:
             result = eval_classifier.classify(text)
-            pred_labels.append(LABEL2ID[result.label])
+            # Use raw argmax for evaluation — "Other" is not a training label
+            pred_id = LABEL2ID.get(result.label)
+            if pred_id is None:
+                # Confidence was below threshold, use the highest-scoring trained class
+                pred_id = max(range(len(label_names)), key=lambda i: result.all_scores[label_names[i]])
+            pred_labels.append(pred_id)
             pred_probs.append([result.all_scores[name] for name in label_names])
 
         metrics = compute_classification_metrics(

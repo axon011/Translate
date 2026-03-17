@@ -351,12 +351,23 @@ class EventClassifier:
 
     @torch.inference_mode()
     def _evaluate(self, texts: list[str], labels: list[int]) -> float:
-        """Calculate accuracy on a validation set."""
+        """Calculate accuracy on a validation set.
+
+        Uses raw argmax (no confidence threshold) for evaluation,
+        since "Other" is not a training label.
+        """
         self._model.eval()
         correct = 0
         for text, label in zip(texts, labels, strict=True):
-            result = self.classify(text)
-            if LABEL2ID[result.label] == label:
+            inputs = self._tokenizer(
+                text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=self.config.max_length,
+            ).to(self.device)
+            logits = self._model(**inputs).logits
+            pred_id = logits.argmax(dim=-1).item()
+            if pred_id == label:
                 correct += 1
         self._model.train()
         return correct / len(labels)

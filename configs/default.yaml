@@ -47,7 +47,7 @@ summarizer:
   max_length: 130
   min_length: 30
   length_penalty: 2.0
-  num_beams: 4
+  num_beams: 2
   early_stopping: true
 
 # Translation (fallback strategy)
@@ -55,7 +55,7 @@ translator:
   model_id: "Helsinki-NLP/opus-mt-de-en"
   device: "cuda"
   max_length: 512
-  num_beams: 4
+  num_beams: 2
 
 # Language Detection
 lang_detect:

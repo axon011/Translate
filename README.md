@@ -45,38 +45,48 @@ Audio (German) --> Whisper ASR --> Language Detection --> Cross-Lingual NER
 
 ## Evaluation Results
 
-| Component | Metric | Score | Dataset |
-|-----------|--------|-------|---------|
-| NER | F1 (overall) | 0.647 | WikiANN German (500 samples) |
-| NER | F1 (PER) | 0.798 | WikiANN German |
-| NER | F1 (LOC) | 0.664 | WikiANN German |
-| NER | F1 (ORG) | 0.524 | WikiANN German |
-| Classifier | Accuracy | 93.55% | 10kGNAD (806 test samples) |
-| Classifier | Macro F1 | 94.07% | 10kGNAD |
-| Classifier | Balanced Accuracy | — | 10kGNAD |
-| Classifier | ROC-AUC (macro) | — | 10kGNAD |
-| Classifier | MCC | — | 10kGNAD |
-| ASR | WER | 12.10% | TTS-generated German (15 samples) |
-| ASR | CER | — | TTS-generated German (15 samples) |
-| Translation | BLEU | — | Curated DE→EN parallel sentences (10 samples) |
-| Translation | ChrF | — | Curated DE→EN parallel sentences |
-| Translation | BERTScore F1 | — | Curated DE→EN parallel sentences |
-| Summarization | ROUGE-1 | 0.5234 | Curated German news (5 samples) |
-| Summarization | ROUGE-2 | 0.2265 | Curated German news |
-| Summarization | ROUGE-L | 0.3808 | Curated German news |
+### NER (WikiANN German, 500 samples)
 
-### Classifier Per-Class Performance
+| Entity | F1 | Precision | Recall |
+|--------|-----|-----------|--------|
+| PER | 0.798 | 0.801 | 0.794 |
+| LOC | 0.664 | 0.609 | 0.730 |
+| ORG | 0.524 | 0.754 | 0.402 |
+| **Overall** | **0.647** | 0.643 | 0.650 |
+
+PER scores highest because person names are consistent across languages. ORG is hardest -- German organizational names are often long compound words that get partially tokenized. F1 improved from 0.63 to 0.647 after switching to overlap-based token alignment (>50% character overlap).
+
+### Classifier (10kGNAD, 806 test samples)
 
 | Class | F1 | Precision | Recall |
 |-------|-----|-----------|--------|
-| Political | 0.926 | 0.912 | 0.941 |
-| Economic | 0.909 | 0.934 | 0.885 |
-| Sports | 0.983 | 0.983 | 0.983 |
-| Technology | 0.945 | 0.939 | 0.951 |
+| Sports | 0.979 | 0.975 | 0.983 |
+| Technology | 0.950 | 0.939 | 0.960 |
+| Political | 0.921 | 0.918 | 0.925 |
+| Economic | 0.907 | 0.925 | 0.889 |
 
-### Notes on NER Evaluation
+**Overall: 93.4% accuracy, 93.9% macro F1** -- achieved in just 3 epochs with gradient accumulation (effective batch size 16). Sports is easiest (distinct vocabulary), Economic is hardest (overlaps with Political on fiscal policy topics). Training loss: 0.58 → 0.20 → 0.12.
 
-NER F1=0.647 after fixing token-to-character alignment (improved from 0.63 with overlap-based alignment >50%). Qualitative performance is substantially better -- the model correctly extracts entities like "Angela Merkel" (PER), "Berlin" (LOC), "Europaeische Union" (ORG) from German text with high confidence.
+### Cross-Lingual NER vs Translate-then-NER (200 samples)
+
+| Metric | Cross-Lingual | Translate-then-NER |
+|--------|--------------|-------------------|
+| F1 | **0.681** | 0.551 |
+| PER F1 | **0.813** | 0.644 |
+| LOC F1 | **0.686** | 0.560 |
+| ORG F1 | **0.574** | 0.485 |
+| Time | **9.3s** | 77.7s |
+
+Cross-lingual wins by **+13% F1** and is **8.4x faster**. Translation corrupts entity boundaries -- German compound words like "Bundesverfassungsgericht" become "Federal Constitutional Court" (1 word → 3), breaking character offsets and entity spans.
+
+### ASR & Summarization
+
+| Component | Metric | Score |
+|-----------|--------|-------|
+| ASR | WER | 12.1% (15 TTS-generated German samples) |
+| Summarization | ROUGE-1 / ROUGE-2 / ROUGE-L | 0.523 / 0.227 / 0.381 |
+
+ASR errors are mostly format differences ("drei" vs "3") and minor spelling variations. ROUGE scores reflect abstractive generation -- the model paraphrases rather than copying, so exact n-gram overlap is naturally lower.
 
 ## Production Benchmarks
 

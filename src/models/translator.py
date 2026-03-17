@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gc
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 from transformers import MarianMTModel, MarianTokenizer
@@ -49,6 +50,9 @@ class Translator:
         self._tokenizer = None
         self._loaded = False
 
+        local_path = Path("models/translator-local")
+        self._load_from = str(local_path) if local_path.exists() else self.config.model_id
+
     def load(self) -> None:
         """Load model onto device."""
         if self._loaded:
@@ -59,10 +63,8 @@ class Translator:
             extra={"component": "translator", "model": self.config.model_id},
         )
 
-        self._tokenizer = MarianTokenizer.from_pretrained(self.config.model_id)
-        self._model = MarianMTModel.from_pretrained(
-            self.config.model_id, low_cpu_mem_usage=False
-        )
+        self._tokenizer = MarianTokenizer.from_pretrained(self._load_from)
+        self._model = MarianMTModel.from_pretrained(self._load_from, low_cpu_mem_usage=False)
         self._model.to(self.device)
         self._model.eval()
 
