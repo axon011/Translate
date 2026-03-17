@@ -193,12 +193,12 @@ class NERExtractor:
         if not valid:
             return results
 
-        valid_indices, valid_texts = zip(*valid)
+        valid_indices, valid_texts = zip(*valid, strict=True)
 
         with TimingContext("ner_batch_inference") as t:
             batch_raw = self._pipe(list(valid_texts), batch_size=len(valid_texts))
 
-        for idx, raw_entities in zip(valid_indices, batch_raw):
+        for idx, raw_entities in zip(valid_indices, batch_raw, strict=True):
             entities = []
             for ent in raw_entities:
                 label = ent["entity_group"]

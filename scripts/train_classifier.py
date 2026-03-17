@@ -129,7 +129,9 @@ def main():
             pred_id = LABEL2ID.get(result.label)
             if pred_id is None:
                 # Confidence was below threshold, use the highest-scoring trained class
-                pred_id = max(range(len(label_names)), key=lambda i: result.all_scores[label_names[i]])
+                pred_id = max(
+                    range(len(label_names)), key=lambda i: result.all_scores[label_names[i]]
+                )
             pred_labels.append(pred_id)
             pred_probs.append([result.all_scores[name] for name in label_names])
 

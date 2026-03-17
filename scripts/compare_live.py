@@ -95,17 +95,19 @@ def main() -> None:
         if only_translate:
             print(f"  Only in Translate+NER: {', '.join(sorted(only_translate))}")
 
-        comparison.append({
-            "title": title,
-            "crosslingual_count": len(crosslingual_entities),
-            "translate_ner_count": len(en_entities),
-            "crosslingual_persons": [e["text"] for e in cl_persons],
-            "translate_persons": [e.text for e in en_persons],
-            "crosslingual_locs": [e["text"] for e in cl_locs],
-            "translate_locs": [e.text for e in en_locs],
-            "translate_time_ms": translate_time,
-            "en_ner_time_ms": ner_time,
-        })
+        comparison.append(
+            {
+                "title": title,
+                "crosslingual_count": len(crosslingual_entities),
+                "translate_ner_count": len(en_entities),
+                "crosslingual_persons": [e["text"] for e in cl_persons],
+                "translate_persons": [e.text for e in en_persons],
+                "crosslingual_locs": [e["text"] for e in cl_locs],
+                "translate_locs": [e.text for e in en_locs],
+                "translate_time_ms": translate_time,
+                "en_ner_time_ms": ner_time,
+            }
+        )
 
     # Final verdict
     print(f"\n{'=' * 90}")
@@ -116,7 +118,9 @@ def main() -> None:
     print(f"  Cross-Lingual NER found {total_cl} total entities across {len(comparison)} articles")
     print(f"  Translate-then-NER found {total_en} total entities across {len(comparison)} articles")
     if total_cl > total_en:
-        print(f"  -> Cross-Lingual wins: +{total_cl - total_en} more entities, no translation overhead")
+        print(
+            f"  -> Cross-Lingual wins: +{total_cl - total_en} more entities, no translation overhead"
+        )
     elif total_en > total_cl:
         print(f"  -> Translate-then-NER found +{total_en - total_cl} more entities")
     else:

@@ -110,7 +110,10 @@ class ScrapeResponse(BaseModel):
 class RssRequest(BaseModel):
     source: str = Field(..., description="RSS feed name (e.g. 'Top News', 'Tagesschau')")
     max_articles: int = Field(default=3, ge=1, le=10, description="Max articles to scrape")
-    include_summary: bool = Field(default=False, description="Whether to generate summaries (adds ~20s for translator+summarizer loading)")
+    include_summary: bool = Field(
+        default=False,
+        description="Whether to generate summaries (adds ~20s for translator+summarizer loading)",
+    )
 
 
 class RssArticleResult(BaseModel):
@@ -530,18 +533,14 @@ async def process_rss(request: RssRequest):
 
     def _scrape_rss_and_run():
         feed_url = RSS_FEEDS[request.source]
-        articles = scrape_from_rss(
-            feed_url, max_articles=request.max_articles, delay=0.5
-        )
+        articles = scrape_from_rss(feed_url, max_articles=request.max_articles, delay=0.5)
 
         # Batch process: loads each model once for all articles
         texts = [a["cleaned_text"] for a in articles]
-        pipeline_results = pipeline.run_batch(
-            texts, include_summary=request.include_summary
-        )
+        pipeline_results = pipeline.run_batch(texts, include_summary=request.include_summary)
 
         results = []
-        for article, result in zip(articles, pipeline_results):
+        for article, result in zip(articles, pipeline_results, strict=True):
             entities = [
                 EntityResponse(
                     text=e.text,

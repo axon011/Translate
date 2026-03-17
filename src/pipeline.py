@@ -248,9 +248,7 @@ class NewsPipeline:
         if not texts:
             return []
 
-        do_summary = (
-            include_summary if include_summary is not None else self.enable_summary
-        )
+        do_summary = include_summary if include_summary is not None else self.enable_summary
         n = len(texts)
         request_ids = [str(uuid.uuid4())[:8] for _ in range(n)]
         all_timings: list[dict[str, float]] = [{} for _ in range(n)]
@@ -287,10 +285,11 @@ class NewsPipeline:
         for i in range(n):
             all_timings[i]["classification_ms"] = per_item_cls
 
-        # Unload both before loading translator/summarizer
-        self.ner.unload()
-        self.classifier.unload()
-        _clear_gpu_cache()
+        # Only unload if we need VRAM for translator/summarizer
+        if do_summary and self.sequential_mode:
+            self.ner.unload()
+            self.classifier.unload()
+            _clear_gpu_cache(full=True)
 
         # 4. Translation (only German texts, only if summarizing)
         all_english_texts = list(texts)

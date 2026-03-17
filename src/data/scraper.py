@@ -6,7 +6,7 @@ cleans and prepares it for the NLP pipeline.
 
 from __future__ import annotations
 
-import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 import feedparser
@@ -190,28 +190,30 @@ def scrape_from_rss(
     if feed.bozo and not feed.entries:
         raise ScrapeError(f"Failed to parse RSS feed: {feed.bozo_exception}")
 
-    articles = []
-    for i, entry in enumerate(feed.entries[:max_articles]):
-        url = entry.get("link")
-        if not url:
-            continue
+    entries = [
+        (entry.get("link"), entry.get("title"))
+        for entry in feed.entries[:max_articles]
+        if entry.get("link")
+    ]
 
+    def _fetch(url_title):
+        url, rss_title = url_title
         try:
             article = scrape_article(url)
-            # Override title with RSS title if available
-            if entry.get("title"):
-                article["title"] = entry["title"]
-            articles.append(article)
+            if rss_title:
+                article["title"] = rss_title
+            return article
         except ScrapeError as e:
-            logger.warning(
-                f"Skipping article {url}: {e}",
-                extra={"component": "scraper"},
-            )
-            continue
+            logger.warning(f"Skipping article {url}: {e}", extra={"component": "scraper"})
+            return None
 
-        # Polite delay between requests
-        if i < len(feed.entries[:max_articles]) - 1:
-            time.sleep(delay)
+    articles = []
+    with ThreadPoolExecutor(max_workers=min(len(entries), 5)) as executor:
+        futures = {executor.submit(_fetch, e): e for e in entries}
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                articles.append(result)
 
     logger.info(
         f"Scraped {len(articles)}/{max_articles} articles from RSS feed",
