@@ -26,7 +26,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy installed packages from builder
+# Remove base image's torch/torchvision before copying builder packages
+# Base image bundles torch 2.5.1 in /opt/conda — its dist-info metadata survives
+# the COPY overlay, causing transformers to see the old version
+RUN pip uninstall -y torch torchvision torchaudio 2>/dev/null; \
+    rm -rf /opt/conda/lib/python3.11/site-packages/torch* ; true
+
+# Copy installed packages from builder (now torch 2.10+ takes over cleanly)
 COPY --from=builder /install /opt/conda
 
 # Copy application code (includes static/ for web dashboard)
